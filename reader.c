@@ -146,10 +146,8 @@ int main(int argc, char *argv[]) {
            index[i].name, index[i].offset);
   }
 
-  printf("\n\n");
-
   while (!feof(stdin)) {
-    printf("Sequence index (0-%d, -1 to exit)> ", header.sequenceCount - 1);
+    printf("\nSequence index (0-%d, -1 to exit)> ", header.sequenceCount - 1);
 
     int i = getInt(header.sequenceCount - 1);
     if (i == -1) {
@@ -200,46 +198,87 @@ int main(int argc, char *argv[]) {
            index[i].name, numPlaces(header.sequenceCount), i, seq->dnaSize,
            seq->nBlockCount, seq->maskBlockCount);
 
-    printf("Starting base offset (0-%d, -1 to exit)> ", seq->dnaSize - 1);
-    int baseOffset = getInt(seq->dnaSize - 1);
-    if (baseOffset == -1) {
-      continue;
-    }
-    printf("Length to read (0-%d, -1 to exit)> ", seq->dnaSize - baseOffset);
-    int length = getInt(seq->dnaSize - baseOffset);
-    if (length == -1) {
-      continue;
-    }
-
-    char midBase = baseOffset % 4;
-
-    uint32_t pos = seq->dnaOffset + (baseOffset / 4);
-    char packed;
-
-    fseek(f, pos, SEEK_SET);
-    fread(&packed, sizeof(packed), 1, f);
-    printf("%x", packed);
-
-    for (int j = 0; j < length; j++) {
-      if (j % 12 == 0) {
-        putchar('\n');
+    while (!feof(stdin)) {
+      printf("Starting base offset (0-%d, -1 to exit)> ", seq->dnaSize - 1);
+      int baseOffset = getInt(seq->dnaSize - 1);
+      if (baseOffset == -1) {
+        break;
       }
-      char baseIndex = ((j - midBase) % 4);
-
-      if (baseIndex == 0 && j != 0) {
-        fread(&packed, sizeof(packed), 1, f);
+      printf("Length to read (0-%d, -1 to exit)> ", seq->dnaSize - baseOffset);
+      int length = getInt(seq->dnaSize - baseOffset);
+      if (length == -1) {
+        break;
       }
-      // printf("%d %x %d", j, packed, baseIndex);
-      baseIndex = 3 - baseIndex;
-      baseIndex *= 2;
-      baseIndex = packed >> baseIndex;
-      baseIndex &= 0b11;
 
-      // printf("%d %c\n", baseIndex, DNA_BITS[baseIndex]);
-      putchar(DNA_BITS[baseIndex]);
+      char midBase = baseOffset % 4;
+
+      uint32_t pos = seq->dnaOffset + (baseOffset / 4);
+      char packed;
+
+      fseek(f, pos, SEEK_SET);
+      fread(&packed, sizeof(packed), 1, f);
+
+      int nBlock = 0;
+      int maskBlock = 0;
+
+      for (; nBlock < seq->nBlockCount; nBlock++) {
+        if (baseOffset >= seq->nBlockStarts[nBlock] &&
+            baseOffset < seq->nBlockStarts[nBlock] + seq->nBlockSizes[nBlock]) {
+          break;
+        }
+      }
+
+      for (; maskBlock < seq->maskBlockCount; maskBlock++) {
+        if (baseOffset >= seq->maskBlockStarts[maskBlock] &&
+            baseOffset < seq->maskBlockStarts[maskBlock] +
+                             seq->maskBlockSizes[maskBlock]) {
+          break;
+        }
+      }
+
+      for (int j = 0; j < length; j++) {
+        if (j % 12 == 0) {
+          putchar('\n');
+        }
+
+        if (nBlock < seq->nBlockCount &&
+            baseOffset + j <=
+                seq->nBlockStarts[nBlock] + seq->nBlockSizes[nBlock]) {
+          if (baseOffset + j ==
+              seq->nBlockStarts[nBlock] + seq->nBlockSizes[nBlock]) {
+            nBlock++;
+          }
+          putchar('N');
+          continue;
+        }
+
+        int masked = 0;
+        if (maskBlock < seq->maskBlockCount &&
+            baseOffset + j <= seq->maskBlockStarts[maskBlock] +
+                                  seq->maskBlockSizes[maskBlock]) {
+          if (baseOffset + j == seq->maskBlockStarts[maskBlock] +
+                                    seq->maskBlockSizes[maskBlock]) {
+            maskBlock++;
+          }
+          masked = 1;
+        }
+
+        char baseIndex = ((j - midBase) % 4);
+
+        if (baseIndex == 0 && j != 0) {
+          fread(&packed, sizeof(packed), 1, f);
+        }
+        baseIndex = 3 - baseIndex;
+        baseIndex *= 2;
+        baseIndex = packed >> baseIndex;
+        baseIndex &= 0b11;
+
+        putchar(masked ? DNA_BITS[baseIndex] + 0x20 : DNA_BITS[baseIndex]);
+      }
+
+      putchar('\n');
+      putchar('\n');
     }
-
-    putchar('\n');
   }
 
   for (int i = 0; i < header.sequenceCount; i++) {
